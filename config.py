@@ -21,7 +21,7 @@ class Config:
     ]
 
     # Auto-Delete Time in seconds (5 minutes = 300 seconds)
-    AUTO_DELETE_TIME = 300
+    AUTO_DELETE_TIME = 60
 
     # File path for the filter import JSON (used in /import command)
     IMPORT_FILE_PATH = "/root/Filter/anime.json"
