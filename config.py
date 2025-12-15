@@ -1,8 +1,31 @@
-API_ID = 123456
-API_HASH = "API_HASH"
-BOT_TOKEN = "BOT_TOKEN"
+# Telegram App credentials (my.telegram.org se)
+API_ID = 27353035
+API_HASH = "cf2a75861140ceb746c7796e07cbde9e"
 
-OWNER_ID = 123456789
-WORK_GROUP_ID = -1001234567890
+# Bot token (BotFather se)
+BOT_TOKEN = "8140111290:AAHkbPYHFIEiOIrQlGaNRDFyuUv-qvu2Mi8"
 
-AUTO_DELETE_TIME = 300  # 5 minutes
+
+# Bot owner (sirf ye user commands use kar sakta hai)
+/import
+/del
+/list
+OWNER_ID = 1327021082
+
+
+# MongoDB connection (MongoDB Atlas se)
+MONGO_URL = "mongodb+srv://poulomi006969:hello@cluster0.e5s9lr7.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+DB_NAME = "filterbot"
+
+
+# Auto delete time (seconds)
+# 300 = 5 minutes
+AUTO_DELETE_TIME = 300
+
+
+# JIN GROUPS me bot kaam karega (multiple allowed)
+# Bot admin hona chahiye
+ALLOWED_GROUPS = [
+    -1001708718174,
+    -1002222222222
+]
