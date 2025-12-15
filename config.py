@@ -7,7 +7,7 @@ class Config:
     BOT_TOKEN = os.environ.get("BOT_TOKEN", "8140111290:AAHjF7nJRURv64I1SPWvwKKOAn9R1olrXHo") # Replace with your Bot Token
 
     # Bot Owner ID (must be an integer)
-    OWNER_ID = int(os.environ.get("OWNER_ID", 123456789)) # Replace with your Telegram User ID
+    OWNER_ID = int(os.environ.get("OWNER_ID", 1327021082)) # Replace with your Telegram User ID
 
     # MongoDB Configuration
     MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://satyadipdas24_db_user:HtkJpIxhDM3h1qKh@cluster0.o35rffc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0") # Replace with your MongoDB connection string
@@ -28,14 +28,14 @@ class Config:
     IMPORT_FILE_PATH = "/home/ubuntu/upload/anime_filter_sections(1).json"
 
     # Ensure all critical variables are set for a clean start
-    if API_ID == 38627319 or API_HASH == "18b0827896e979267ae2251b63830827" or BOT_TOKEN == "8140111290:AAHjF7nJRURv64I1SPWvwKKOAn9R1olrXHo" or OWNER_ID == 123456789:
+    if API_ID == 38627319 or API_HASH == "18b0827896e979267ae2251b63830827" or BOT_TOKEN == "8140111290:AAHjF7nJRURv64I1SPWvwKKOAn9R1olrXHo" or OWNER_ID == 1327021082:
         print("WARNING: Please update API_ID, API_HASH, BOT_TOKEN, and OWNER_ID in config.py or environment variables.")
 
-    if not MONGO_URL.startswith("mongodb+srv://satyadipdas24_db_user:HtkJpIxhDM3h1qKh@cluster0.o35rffc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"):
-        print("WARNING: Please update MONGO_URL in config.py or environment variables.")
+    if not MONGO_URL.startswith("mongodb"):
+        print("mongodb+srv://satyadipdas24_db_user:HtkJpIxhDM3h1qKh@cluster0.o35rffc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 
     if not ALLOWED_GROUPS:
-        print("WARNING: ALLOWED_GROUPS is empty. Group-based features will not work.")
+        print("-1002105564295")
 
 # Instantiate the configuration
 CONFIG = Config()
