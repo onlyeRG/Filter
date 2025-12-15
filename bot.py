@@ -15,7 +15,7 @@ filters_collection = db.filters
 # --- Utility Functions ---
 
 # Regex to parse the custom button format: [button text](buttonurl://url)
-BUTTON_REGEX = re.compile(r"\[(.*?)\]$$buttonurl:\/\/(.*?)$$")
+BUTTON_REGEX = re.compile(r"\[(.*?)\]$$buttonurl://(.*?)$$")
 
 def parse_filter_text(text: str) -> tuple[str, InlineKeyboardMarkup | None]:
     """
