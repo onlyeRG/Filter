@@ -25,6 +25,8 @@ class Config:
 
     # File path for the filter import JSON (used in /import command)
     IMPORT_FILE_PATH = "/root/Filter/anime.json"
+    
+    TMDB_API_KEY = "1812c64e48832676a9dfb7517d373e5f"
 
 # Instantiate the configuration
 CONFIG = Config()
