@@ -81,7 +81,18 @@ async def import_filters(_, msg: Message):
         for item in data:
             if "name" in item and "text" in item:
                 name = item["name"].lower().strip()
-                keywords = name.split()  # 👈 IMPORTANT
+                words = name.split()
+
+                # 🔑 KEYWORD STRATEGY
+                if len(words) <= 2:
+                    # Short titles → any word triggers
+                    keywords = words
+                else:
+                    # Long titles → prefix phrases only
+                    keywords = [
+                        " ".join(words[:3]),
+                        " ".join(words[:4])
+                    ]
 
                 docs.append({
                     "name": name,
@@ -126,7 +137,7 @@ async def delete_filter(_, msg: Message):
     else:
         await msg.reply_text("❌ Filter not found")
 
-# -------------------- FILTER MATCHING (FIXED) --------------------
+# -------------------- FILTER MATCHING (SMART) --------------------
 @app.on_message(
     group_filter &
     allowed_group_filter &
@@ -135,13 +146,27 @@ async def delete_filter(_, msg: Message):
     not_edited_filter
 )
 async def apply_filter(_, msg: Message):
-    text = msg.text.lower()
+    text = msg.text.lower().strip()
+    words = text.split()
 
-    words = re.findall(r"\w+", text)  # split safely
+    filter_doc = None
 
-    filter_doc = await filters_collection.find_one({
-        "keywords": {"$in": words}
-    })
+    # 1️⃣ Prefix phrase match (long titles)
+    for length in (4, 3):
+        if len(words) >= length:
+            phrase = " ".join(words[:length])
+            filter_doc = await filters_collection.find_one({
+                "keywords": phrase
+            })
+            if filter_doc:
+                break
+
+    # 2️⃣ Word match fallback (short titles)
+    if not filter_doc:
+        tokens = re.findall(r"\w+", text)
+        filter_doc = await filters_collection.find_one({
+            "keywords": {"$in": tokens}
+        })
 
     if not filter_doc:
         return
@@ -156,12 +181,10 @@ async def apply_filter(_, msg: Message):
 
     # Auto delete after time
     await asyncio.sleep(CONFIG.AUTO_DELETE_TIME)
-
     try:
         await reply.delete()
     except:
         pass
-
     try:
         await msg.delete()
     except:
