@@ -15,7 +15,7 @@ filters_collection = db.filters
 # --- Utility Functions ---
 
 # Fixed regex pattern to properly escape parentheses with $$ and $$
-BUTTON_REGEX = re.compile(r"\[(.*?)\]$$buttonurl://(.*?)$$")
+BUTTON_REGEX = re.compile(r"\[(.*?)\]$$buttonurl:\/\/(.*?)$$")
 
 def parse_filter_text(text: str) -> tuple[str, InlineKeyboardMarkup | None]:
     """
