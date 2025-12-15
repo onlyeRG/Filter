@@ -1,11 +1,11 @@
 API_ID = 27353035
 API_HASH = "cf2a75861140ceb746c7796e07cbde9e"
-BOT_TOKEN = "YOUR_BOT_TOKEN"
+BOT_TOKEN = "8140111290:AAHjF7nJRURv64I1SPWvwKKOAn9R1olrXHo"
 
 OWNER_ID = 1327021082
 
 MONGO_URL = "mongodb+srv://USER:PASS@cluster.mongodb.net/"
-DB_NAME = "filterbot"
+DB_NAME = "filterbot2"
 
 AUTO_DELETE_TIME = 300  # 5 minutes
 
