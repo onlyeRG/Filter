@@ -24,7 +24,7 @@ class Config:
     AUTO_DELETE_TIME = 300
 
     # File path for the filter import JSON (used in /import command)
-    IMPORT_FILE_PATH = "/root/Filter/anime_filter_sections.json"
+    IMPORT_FILE_PATH = "/root/Filter/'anime_filter_sections (1).json'"
 
 # Instantiate the configuration
 CONFIG = Config()
