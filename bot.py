@@ -7,221 +7,167 @@ from pyrogram.enums import ChatType
 from motor.motor_asyncio import AsyncIOMotorClient
 from config import CONFIG
 
-# --- MongoDB Setup ---
+# -------------------- MongoDB --------------------
 mongo_client = AsyncIOMotorClient(CONFIG.MONGO_URL)
 db = mongo_client[CONFIG.DB_NAME]
 filters_collection = db.filters
 
-# --- Utility Functions ---
-
-# Regex to parse the custom button format: [button text](buttonurl://url)
+# -------------------- Button Parser --------------------
 BUTTON_REGEX = re.compile(r"\[(.*?)\]\(buttonurl:\/\/(.*?)\)")
 
-def parse_filter_text(text: str) -> tuple[str, InlineKeyboardMarkup | None]:
-    """
-    Parses the filter text to separate the message content from the inline button.
-    Returns the clean text and an optional InlineKeyboardMarkup.
-    """
+def parse_filter_text(text: str):
     match = BUTTON_REGEX.search(text)
     if not match:
         return text, None
 
-    button_text = match.group(1)
-    button_url = match.group(2)
+    btn_text = match.group(1)
+    btn_url = match.group(2)
     clean_text = BUTTON_REGEX.sub("", text).strip()
 
     keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton(button_text, url=button_url)]]
+        [[InlineKeyboardButton(btn_text, url=btn_url)]]
     )
     return clean_text, keyboard
 
-# --- Custom Filters ---
-
+# -------------------- Custom Filters --------------------
 def owner_only(_, __, msg: Message):
-    """Filter for messages sent by the bot owner."""
     return msg.from_user and msg.from_user.id == CONFIG.OWNER_ID
 
-def private_chat_only(_, __, msg: Message):
-    """Filter for messages in a private chat."""
+def private_only(_, __, msg: Message):
     return msg.chat.type == ChatType.PRIVATE
 
-def group_chat_only(_, __, msg: Message):
-    """Filter for messages in a group or supergroup."""
+def group_only(_, __, msg: Message):
     return msg.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
 
-def allowed_group_only(_, __, msg: Message):
-    """Filter for messages in an allowed group."""
+def allowed_group(_, __, msg: Message):
     return msg.chat.id in CONFIG.ALLOWED_GROUPS
 
 def not_edited(_, __, msg: Message):
-    """Filter to ignore edited messages."""
     return msg.edit_date is None
 
-# Combine custom filters
 owner_filter = filters.create(owner_only)
-private_filter = filters.create(private_chat_only)
-group_filter = filters.create(group_chat_only)
-allowed_group_filter = filters.create(allowed_group_only)
+private_filter = filters.create(private_only)
+group_filter = filters.create(group_only)
+allowed_group_filter = filters.create(allowed_group)
 not_edited_filter = filters.create(not_edited)
 
-# --- Pyrogram Client Initialization ---
+# -------------------- Bot Init --------------------
 app = Client(
-    "pyrogram_bot",
+    "filter-bot",
     api_id=CONFIG.API_ID,
     api_hash=CONFIG.API_HASH,
     bot_token=CONFIG.BOT_TOKEN
 )
 
-# --- Handlers ---
-
+# -------------------- Commands --------------------
 @app.on_message(filters.command("start") & private_filter)
-async def start_handler(_, msg: Message):
-    """Basic start command handler for private chat."""
+async def start(_, msg: Message):
     await msg.reply_text(
-        "Hello! I am your filter bot. Use /import to add filters (Owner only)."
+        "Hello 👋\n\n"
+        "• /import → Import filters (Owner only)\n"
+        "• /list → List filters (Group)\n"
+        "• /del <name> → Delete filter (Owner)"
     )
 
 @app.on_message(filters.command("import") & private_filter & owner_filter)
-async def import_handler(_, msg: Message):
-    """
-    Handler for the /import command.
-    Works only in private chat and only for the bot owner.
-    Imports filters from the specified JSON file into MongoDB.
-    """
+async def import_filters(_, msg: Message):
     try:
         with open(CONFIG.IMPORT_FILE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        # Clear existing filters and insert new ones
         await filters_collection.delete_many({})
-        
-        # Prepare data for insertion, ensuring required fields are present
-        filters_to_insert = []
+
+        docs = []
         for item in data:
             if "name" in item and "text" in item:
-                filters_to_insert.append({
-                    "name": item["name"].lower(), # Store name in lowercase for case-insensitive matching
+                name = item["name"].lower().strip()
+                keywords = name.split()  # 👈 IMPORTANT
+
+                docs.append({
+                    "name": name,
                     "text": item["text"],
-                    "keywords": [item["name"].lower()] # Use the name as the primary keyword for now
+                    "keywords": keywords
                 })
 
-        if filters_to_insert:
-            await filters_collection.insert_many(filters_to_insert)
-            await msg.reply_text(
-                f"Successfully imported **{len(filters_to_insert)}** filters from `{CONFIG.IMPORT_FILE_PATH}`."
-            )
+        if docs:
+            await filters_collection.insert_many(docs)
+            await msg.reply_text(f"✅ Imported {len(docs)} filters")
         else:
-            await msg.reply_text("The import file is empty or contains no valid filters.")
+            await msg.reply_text("⚠️ No valid filters found")
 
-    except FileNotFoundError:
-        await msg.reply_text(
-            f"Error: Import file not found at `{CONFIG.IMPORT_FILE_PATH}`. "
-            "Please ensure the file is present and the path in `config.py` is correct."
-        )
-    except json.JSONDecodeError:
-        await msg.reply_text("Error: Failed to decode JSON from the import file. Please check the file format.")
     except Exception as e:
-        await msg.reply_text(f"An unexpected error occurred during import: `{e}`")
+        await msg.reply_text(f"❌ Import failed:\n`{e}`")
 
 @app.on_message(filters.command("list") & group_filter & allowed_group_filter)
-async def list_handler(_, msg: Message):
-    """
-    Handler for the /list command.
-    Works only in allowed groups. Lists all filter names.
-    """
-    try:
-        # Fetch all filter names, sorted alphabetically
-        cursor = filters_collection.find({}, {"name": 1}).sort("name", 1)
-        filters_list = [f["name"] for f in await cursor.to_list(length=None)]
+async def list_filters(_, msg: Message):
+    cursor = filters_collection.find({}, {"name": 1}).sort("name", 1)
+    names = [doc["name"] async for doc in cursor]
 
-        if not filters_list:
-            await msg.reply_text("No filters have been added yet.")
-            return
+    if not names:
+        await msg.reply_text("No filters found.")
+        return
 
-        # Format the list into a readable message
-        header = f"**Total Filters: {len(filters_list)}**\n\n"
-        body = "\n".join(f"- `{name}`" for name in filters_list)
-        
-        # Telegram message limit is 4096 characters
-        if len(header + body) > 4096:
-            # Simple truncation for now, a better solution would be to send multiple messages
-            body = body[:4000] + "\n..."
+    text = "**Available Filters:**\n\n"
+    text += "\n".join(f"• `{n}`" for n in names[:100])
 
-        await msg.reply_text(header + body)
-
-    except Exception as e:
-        await msg.reply_text(f"An error occurred while listing filters: `{e}`")
+    await msg.reply_text(text)
 
 @app.on_message(filters.command("del") & group_filter & allowed_group_filter & owner_filter)
-async def delete_handler(_, msg: Message):
-    """
-    Handler for the /del <filter_name> command.
-    Works only in allowed groups and only for the bot owner.
-    Deletes a filter by name.
-    """
+async def delete_filter(_, msg: Message):
     if len(msg.command) < 2:
-        await msg.reply_text("Usage: `/del <filter_name>`")
+        await msg.reply_text("Usage: /del <filter_name>")
         return
 
-    filter_name = " ".join(msg.command[1:]).lower()
+    name = " ".join(msg.command[1:]).lower().strip()
+    res = await filters_collection.delete_one({"name": name})
+
+    if res.deleted_count:
+        await msg.reply_text(f"✅ Deleted `{name}`")
+    else:
+        await msg.reply_text("❌ Filter not found")
+
+# -------------------- FILTER MATCHING (FIXED) --------------------
+@app.on_message(
+    group_filter &
+    allowed_group_filter &
+    filters.text &
+    ~filters.command([]) &
+    not_edited_filter
+)
+async def apply_filter(_, msg: Message):
+    text = msg.text.lower()
+
+    words = re.findall(r"\w+", text)  # split safely
+
+    filter_doc = await filters_collection.find_one({
+        "keywords": {"$in": words}
+    })
+
+    if not filter_doc:
+        return
+
+    reply_text, keyboard = parse_filter_text(filter_doc["text"])
+
+    reply = await msg.reply_text(
+        reply_text,
+        reply_markup=keyboard,
+        disable_web_page_preview=True
+    )
+
+    # Auto delete after time
+    await asyncio.sleep(CONFIG.AUTO_DELETE_TIME)
 
     try:
-        result = await filters_collection.delete_one({"name": filter_name})
+        await reply.delete()
+    except:
+        pass
 
-        if result.deleted_count == 1:
-            await msg.reply_text(f"Filter `{filter_name}` successfully deleted.")
-        else:
-            await msg.reply_text(f"Filter `{filter_name}` not found.")
+    try:
+        await msg.delete()
+    except:
+        pass
 
-    except Exception as e:
-        await msg.reply_text(f"An error occurred while deleting the filter: `{e}`")
-
-@app.on_message(group_filter & allowed_group_filter & ~filters.command([]) & not_edited_filter)
-async def filter_message_handler(_, msg: Message):
-    """
-    Handler for non-command text messages in allowed groups.
-    Applies filters based on message text.
-    """
-    if not msg.text:
-        return
-
-    # Check if the message text matches any filter name (case-insensitive)
-    search_text = msg.text.lower().strip()
-    
-    # Simple check: if the message text exactly matches a filter name
-    filter_doc = await filters_collection.find_one({"name": search_text})
-
-    if filter_doc:
-        # Filter found, process the reply
-        raw_text = filter_doc["text"]
-        clean_text, reply_markup = parse_filter_text(raw_text)
-
-        # Send the reply
-        reply_msg = await msg.reply_text(
-            clean_text,
-            reply_markup=reply_markup,
-            disable_web_page_preview=True
-        )
-
-        # Schedule auto-deletion
-        await asyncio.sleep(CONFIG.AUTO_DELETE_TIME)
-        
-        # Attempt to delete both messages
-        try:
-            await reply_msg.delete()
-        except Exception:
-            # Ignore errors if the message is already deleted or bot lacks permission
-            pass
-        
-        try:
-            await msg.delete()
-        except Exception:
-            # Ignore errors if the message is already deleted or bot lacks permission
-            pass
-
-# --- Main Execution ---
-
+# -------------------- Run --------------------
 if __name__ == "__main__":
-    print("Starting bot...")
+    print("🤖 Filter Bot Running")
     app.run()
-    print("Bot stopped.")
