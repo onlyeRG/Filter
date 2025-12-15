@@ -5,12 +5,12 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pymongo import MongoClient
 from config import *
 
-# ---------------- MONGO ----------------
+# ---------- MongoDB ----------
 mongo = MongoClient(MONGO_URL)
 db = mongo[DB_NAME]
 filters_db = db.filters
 
-# ---------------- BOT ----------------
+# ---------- Bot ----------
 app = Client(
     "filter-bot",
     api_id=API_ID,
@@ -18,7 +18,7 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-# ---------------- UTIL ----------------
+# ---------- Utils ----------
 async def auto_delete(msg, delay=AUTO_DELETE_TIME):
     await asyncio.sleep(delay)
     try:
@@ -26,14 +26,17 @@ async def auto_delete(msg, delay=AUTO_DELETE_TIME):
     except:
         pass
 
-# ---------------- IMPORT ----------------
+def owner_only(message):
+    return message.from_user and message.from_user.id == OWNER_ID
+
+# ---------- IMPORT (PM ONLY, OWNER ONLY) ----------
 @app.on_message(filters.private & filters.command("import"))
 async def import_filters(client, message):
-    if message.from_user.id != OWNER_ID:
+    if not owner_only(message):
         return await message.reply("❌ Owner only.")
 
     if not message.reply_to_message or not message.reply_to_message.document:
-        return await message.reply("📎 Reply to JSON file.")
+        return await message.reply("📎 Reply to a JSON file.")
 
     path = await message.reply_to_message.download()
 
@@ -43,9 +46,23 @@ async def import_filters(client, message):
 
         added = 0
         for item in data:
+            name = item.get("name")
+            url = item.get("url")
+            button_text = item.get("button_text", "⛩️ GET ANIME ⛩️")
+
+            if not name or not url:
+                continue
+
+            doc = {
+                "name": name.strip().lower(),
+                "display": name.strip(),
+                "url": url.strip(),
+                "button_text": button_text.strip()
+            }
+
             filters_db.update_one(
-                {"name": item["name"].lower()},
-                {"$set": item},
+                {"name": doc["name"]},
+                {"$set": doc},
                 upsert=True
             )
             added += 1
@@ -53,58 +70,64 @@ async def import_filters(client, message):
         await message.reply(f"✅ Imported {added} filters.")
 
     except Exception as e:
-        await message.reply(f"❌ Error:\n`{e}`")
+        await message.reply(f"❌ Import failed:\n`{e}`")
 
-# ---------------- DELETE ----------------
+# ---------- DELETE (PM ONLY, OWNER ONLY) ----------
 @app.on_message(filters.private & filters.command("del"))
 async def delete_filter(client, message):
-    if message.from_user.id != OWNER_ID:
+    if not owner_only(message):
         return await message.reply("❌ Owner only.")
 
     if len(message.command) < 2:
-        return await message.reply("Usage: /del Anime Name")
+        return await message.reply("Usage: /del <Anime Name>")
 
-    name = " ".join(message.command[1:]).lower()
-    result = filters_db.delete_one({"name": name})
+    name = " ".join(message.command[1:]).lower().strip()
+    res = filters_db.delete_one({"name": name})
 
-    if result.deleted_count:
+    if res.deleted_count:
         await message.reply(f"✅ Deleted `{name}`")
     else:
-        await message.reply("❌ Not found")
+        await message.reply("❌ Not found.")
 
-# ---------------- LIST ----------------
+# ---------- LIST (PM ONLY, OWNER ONLY) ----------
+# FIXED: chunk messages to avoid MESSAGE_TOO_LONG
 @app.on_message(filters.private & filters.command("list"))
 async def list_filters(client, message):
-    if message.from_user.id != OWNER_ID:
+    if not owner_only(message):
         return
 
-    data = list(filters_db.find())
+    data = list(filters_db.find({}, {"_id": 0, "display": 1}))
     if not data:
         return await message.reply("No filters found.")
 
-    text = "📜 **Filters List**\n\n"
-    for i in data:
-        text += f"• {i['name']}\n"
+    chunk = "📜 **Filters List**\n\n"
+    for item in data:
+        line = f"• {item.get('display','')}\n"
+        if len(chunk) + len(line) > 4000:
+            await message.reply(chunk)
+            chunk = ""
+        chunk += line
 
-    await message.reply(text)
+    if chunk:
+        await message.reply(chunk)
 
-# ---------------- GROUP HANDLER ----------------
+# ---------- GROUP HANDLER ----------
 @app.on_message(filters.group & filters.chat(ALLOWED_GROUPS) & filters.text)
 async def group_handler(client, message):
     key = message.text.strip().lower()
-
-    data = filters_db.find_one({"name": key})
-    if not data:
+    doc = filters_db.find_one({"name": key})
+    if not doc:
         return
 
     reply = await message.reply(
-        f"{data['name']}\n[⛩️GET ANIME⛩️]",
+        f"{doc['display']}\n[⛩️GET ANIME⛩️]",
         reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton(data["button_text"], url=data["url"])]]
+            [[InlineKeyboardButton(doc["button_text"], url=doc["url"])]]
         ),
         disable_web_page_preview=True
     )
 
+    # auto delete both messages after delay
     asyncio.create_task(auto_delete(reply))
     asyncio.create_task(auto_delete(message))
 
