@@ -2,8 +2,15 @@ import json
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pymongo import MongoClient
 from config import *
 
+# ---------------- MONGO ----------------
+mongo = MongoClient(MONGO_URL)
+db = mongo[DB_NAME]
+filters_db = db.filters
+
+# ---------------- BOT ----------------
 app = Client(
     "filter-bot",
     api_id=API_ID,
@@ -11,68 +18,95 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-FILTERS = {}  # { "anime": {"text": str, "button": InlineKeyboardMarkup} }
+# ---------------- UTIL ----------------
+async def auto_delete(msg, delay=AUTO_DELETE_TIME):
+    await asyncio.sleep(delay)
+    try:
+        await msg.delete()
+    except:
+        pass
 
-# -------------------------
-# IMPORT (PM ONLY, OWNER ONLY)
-# -------------------------
+# ---------------- IMPORT ----------------
 @app.on_message(filters.private & filters.command("import"))
 async def import_filters(client, message):
     if message.from_user.id != OWNER_ID:
-        return await message.reply("❌ Only owner can import filters.")
+        return await message.reply("❌ Owner only.")
 
     if not message.reply_to_message or not message.reply_to_message.document:
-        return await message.reply("📎 Reply to a JSON file.")
+        return await message.reply("📎 Reply to JSON file.")
 
-    file_path = await message.reply_to_message.download()
+    path = await message.reply_to_message.download()
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        FILTERS.clear()
-        count = 0
-
+        added = 0
         for item in data:
-            name = item["name"].strip()
-            url = item["url"].strip()
+            filters_db.update_one(
+                {"name": item["name"].lower()},
+                {"$set": item},
+                upsert=True
+            )
+            added += 1
 
-            FILTERS[name.lower()] = {
-                "text": f"{name}\n[⛩️GET ANIME⛩️]",
-                "button": InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("⛩️ GET ANIME ⛩️", url=url)]]
-                )
-            }
-            count += 1
-
-        await message.reply(f"✅ Imported {count} filters successfully.")
+        await message.reply(f"✅ Imported {added} filters.")
 
     except Exception as e:
-        await message.reply(f"❌ Import failed:\n`{e}`")
+        await message.reply(f"❌ Error:\n`{e}`")
 
-# -------------------------
-# GROUP FILTER HANDLER
-# -------------------------
-@app.on_message(filters.group & filters.chat(WORK_GROUP_ID) & filters.text)
-async def group_filter(client, message):
+# ---------------- DELETE ----------------
+@app.on_message(filters.private & filters.command("del"))
+async def delete_filter(client, message):
+    if message.from_user.id != OWNER_ID:
+        return await message.reply("❌ Owner only.")
+
+    if len(message.command) < 2:
+        return await message.reply("Usage: /del Anime Name")
+
+    name = " ".join(message.command[1:]).lower()
+    result = filters_db.delete_one({"name": name})
+
+    if result.deleted_count:
+        await message.reply(f"✅ Deleted `{name}`")
+    else:
+        await message.reply("❌ Not found")
+
+# ---------------- LIST ----------------
+@app.on_message(filters.private & filters.command("list"))
+async def list_filters(client, message):
+    if message.from_user.id != OWNER_ID:
+        return
+
+    data = list(filters_db.find())
+    if not data:
+        return await message.reply("No filters found.")
+
+    text = "📜 **Filters List**\n\n"
+    for i in data:
+        text += f"• {i['name']}\n"
+
+    await message.reply(text)
+
+# ---------------- GROUP HANDLER ----------------
+@app.on_message(filters.group & filters.chat(ALLOWED_GROUPS) & filters.text)
+async def group_handler(client, message):
     key = message.text.strip().lower()
 
-    if key in FILTERS:
-        data = FILTERS[key]
+    data = filters_db.find_one({"name": key})
+    if not data:
+        return
 
-        sent = await message.reply(
-            data["text"],
-            reply_markup=data["button"],
-            disable_web_page_preview=True
-        )
+    reply = await message.reply(
+        f"{data['name']}\n[⛩️GET ANIME⛩️]",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton(data["button_text"], url=data["url"])]]
+        ),
+        disable_web_page_preview=True
+    )
 
-        await asyncio.sleep(AUTO_DELETE_TIME)
+    asyncio.create_task(auto_delete(reply))
+    asyncio.create_task(auto_delete(message))
 
-        try:
-            await sent.delete()
-            await message.delete()
-        except:
-            pass
-
-print("🤖 Filter Bot Started")
+print("🤖 Filter Bot Running")
 app.run()
