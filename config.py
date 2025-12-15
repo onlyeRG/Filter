@@ -23,6 +23,5 @@ AUTO_DELETE_TIME = 300
 # JIN GROUPS me bot kaam karega (multiple allowed)
 # Bot admin hona chahiye
 ALLOWED_GROUPS = [
-    -1001708718174,
-    -1002222222222
+    -1001708718174
 ]
