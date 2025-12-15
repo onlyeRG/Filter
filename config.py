@@ -11,7 +11,7 @@ OWNER_ID = 1327021082
 
 
 # MongoDB connection (MongoDB Atlas se)
-MONGO_URL = "mongodb+srv://poulomi006969:hello@cluster0.e5s9lr7.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+MONGO_URL = "mongodb+srv://poulomig644_db_user:d9MMUd5PsTP5MDFf@cluster0.q5evcku.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 DB_NAME = "filterbot"
 
 
