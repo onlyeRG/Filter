@@ -53,11 +53,16 @@ def allowed_group_only(_, __, msg: Message):
     """Filter for messages in an allowed group."""
     return msg.chat.id in CONFIG.ALLOWED_GROUPS
 
+def not_edited(_, __, msg: Message):
+    """Filter to ignore edited messages."""
+    return msg.edit_date is None
+
 # Combine custom filters
 owner_filter = filters.create(owner_only)
 private_filter = filters.create(private_chat_only)
 group_filter = filters.create(group_chat_only)
 allowed_group_filter = filters.create(allowed_group_only)
+not_edited_filter = filters.create(not_edited)
 
 # --- Pyrogram Client Initialization ---
 app = Client(
@@ -171,7 +176,7 @@ async def delete_handler(_, msg: Message):
     except Exception as e:
         await msg.reply_text(f"An error occurred while deleting the filter: `{e}`")
 
-@app.on_message(group_filter & allowed_group_filter & ~filters.command([]) & ~filters.edited)
+@app.on_message(group_filter & allowed_group_filter & ~filters.command([]) & not_edited_filter)
 async def filter_message_handler(_, msg: Message):
     """
     Handler for non-command text messages in allowed groups.
