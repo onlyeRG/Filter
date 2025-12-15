@@ -14,7 +14,8 @@ filters_collection = db.filters
 
 # --- Utility Functions ---
 
-BUTTON_REGEX = re.compile(r"\[(.*?)\]$$buttonurl:\/\/(.*?)$$")
+# Regex to parse the custom button format: [button text](buttonurl://url)
+BUTTON_REGEX = re.compile(r"\[(.*?)\]\(buttonurl:\/\/(.*?)\)")
 
 def parse_filter_text(text: str) -> tuple[str, InlineKeyboardMarkup | None]:
     """
@@ -184,19 +185,11 @@ async def filter_message_handler(_, msg: Message):
     if not msg.text:
         return
 
-    # Convert the message text to lowercase for case-insensitive matching
-    search_text = msg.text.lower()
+    # Check if the message text matches any filter name (case-insensitive)
+    search_text = msg.text.lower().strip()
     
-    # Find all filters and check if any filter name appears as a substring in the message
-    cursor = filters_collection.find({})
-    all_filters = await cursor.to_list(length=None)
-    
-    # Look for the first filter whose name is contained in the message text
-    filter_doc = None
-    for f in all_filters:
-        if f["name"] in search_text:
-            filter_doc = f
-            break
+    # Simple check: if the message text exactly matches a filter name
+    filter_doc = await filters_collection.find_one({"name": search_text})
 
     if filter_doc:
         # Filter found, process the reply
