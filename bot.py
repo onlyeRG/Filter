@@ -1,151 +1,133 @@
 import asyncio
-import json
 import re
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 from config import CONFIG
 
-# ---------- BOT ----------
+# ─── MongoDB ──────────────────────────────────────
+mongo = AsyncIOMotorClient(CONFIG.MONGO_URL)
+db = mongo[CONFIG.DB_NAME]
+filters_col = db.filters
+
+# ─── Bot ──────────────────────────────────────────
 app = Client(
-    "filter-bot",
+    "filter_bot",
     api_id=CONFIG.API_ID,
     api_hash=CONFIG.API_HASH,
     bot_token=CONFIG.BOT_TOKEN
 )
 
-# ---------- DATABASE ----------
-mongo = AsyncIOMotorClient(CONFIG.MONGO_URL)
-db = mongo[CONFIG.DB_NAME]
-filters_col = db.filters
-
-# ---------- BUTTON PARSER ----------
-BTN_REGEX = re.compile(r"\[(.*?)\]\(buttonurl:\/\/(.*?)\)")
+# ─── Button Parser ─────────────────────────────────
+BUTTON_REGEX = re.compile(r"\[(.*?)\]\(buttonurl:\/\/(.*?)\)")
 
 def parse_text(text):
-    match = BTN_REGEX.search(text)
+    match = BUTTON_REGEX.search(text)
     if not match:
         return text, None
-    btn_text, btn_url = match.groups()
-    clean = BTN_REGEX.sub("", text).strip()
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton(btn_text, url=btn_url)]]
+
+    btn = InlineKeyboardMarkup(
+        [[InlineKeyboardButton(match.group(1), url=match.group(2))]]
     )
-    return clean, keyboard
+    clean = BUTTON_REGEX.sub("", text).strip()
+    return clean, btn
 
-# ---------- START ----------
+# ─── Commands ──────────────────────────────────────
+
 @app.on_message(filters.command("start") & filters.private)
-async def start(_, m):
-    await m.reply("✅ Filter Bot Running")
+async def start(_, m: Message):
+    await m.reply("Filter bot running.")
 
-# ---------- IMPORT ----------
 @app.on_message(filters.command("import") & filters.private & filters.user(CONFIG.OWNER_ID))
-async def import_filters(_, m):
-    with open(CONFIG.IMPORT_FILE_PATH, encoding="utf-8") as f:
+async def import_filters(_, m: Message):
+    import json
+    with open("filters.json", "r", encoding="utf-8") as f:
         data = json.load(f)
 
     await filters_col.delete_many({})
-
     docs = []
-    for i in data:
-        name = i["name"].lower().strip()
-        name = re.sub(r"[^\w\s]", "", name)
+
+    for x in data:
         docs.append({
-            "name": name,
-            "text": i["text"]
+            "name": x["name"].lower().strip(),
+            "text": x["text"]
         })
 
-    if docs:
-        await filters_col.insert_many(docs)
-        await m.reply(f"✅ Imported {len(docs)} filters")
-    else:
-        await m.reply("❌ No filters found")
+    await filters_col.insert_many(docs)
+    await m.reply(f"Imported {len(docs)} filters")
 
-# ---------- LIST ----------
 @app.on_message(filters.command("list") & filters.group)
-async def list_filters(_, m):
+async def list_filters(_, m: Message):
     if m.chat.id not in CONFIG.ALLOWED_GROUPS:
         return
 
-    items = await filters_col.find().sort("name", 1).to_list(None)
-    if not items:
+    names = [x["name"] async for x in filters_col.find({}, {"name": 1})]
+    if not names:
         return await m.reply("No filters")
 
-    text = "**📜 Filters List:**\n\n"
-    for f in items:
-        text += f"• {f['name']}\n"
+    msg = "\n".join(f"- {n}" for n in names)
+    if len(msg) > 4000:
+        msg = msg[:3900] + "\n..."
 
-    for i in range(0, len(text), 4000):
-        await m.reply(text[i:i+4000])
+    await m.reply(msg)
 
-# ---------- DELETE ----------
-@app.on_message(filters.command("del") & filters.group & filters.user(CONFIG.OWNER_ID))
-async def delete_filter(_, m):
-    if len(m.command) < 2:
-        return await m.reply("/del <name>")
+# ─── MAIN FILTER LOGIC ─────────────────────────────
 
-    name = " ".join(m.command[1:]).lower()
-    name = re.sub(r"[^\w\s]", "", name)
+@app.on_message(filters.group & filters.text & ~filters.command([]))
+async def apply_filter(_, m: Message):
+    if m.chat.id not in CONFIG.ALLOWED_GROUPS:
+        return
 
-    res = await filters_col.delete_one({"name": name})
-    if res.deleted_count:
-        await m.reply("✅ Deleted")
-    else:
-        await m.reply("❌ Not found")
+    text = m.text.lower()
+    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
 
-# ---------- SEND ----------
-async def send_reply(msg, f):
-    text, markup = parse_text(f["text"])
-    reply = await msg.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
+    words = text.split()
+    filters_db = await filters_col.find().to_list(None)
+
+    exact = None
+    matches = []
+
+    for f in filters_db:
+        fname = f["name"]
+
+        # exact match
+        if text == fname:
+            exact = f
+            break
+
+        # word based match
+        fname_words = fname.split()
+        if all(w in words for w in fname_words):
+            matches.append(f)
+
+    if exact:
+        await send_reply(m, exact)
+        return
+
+    if len(matches) == 1:
+        await send_reply(m, matches[0])
+
+# ─── Reply + Auto Delete ───────────────────────────
+
+async def send_reply(m: Message, f):
+    text, btn = parse_text(f["text"])
+
+    reply = await m.reply(
+        text,
+        reply_markup=btn,
+        disable_web_page_preview=True
+    )
 
     await asyncio.sleep(CONFIG.AUTO_DELETE_TIME)
+
     try:
         await reply.delete()
-        await msg.delete()
+        await m.delete()
     except:
         pass
 
-# ---------- CORE FILTER LOGIC ----------
-@app.on_message(filters.group & filters.text & ~filters.command([]))
-async def apply_filters(_, msg: Message):
-    if msg.chat.id not in CONFIG.ALLOWED_GROUPS:
-        return
+# ─── Run ───────────────────────────────────────────
 
-    text = msg.text.lower()
-    text = re.sub(r"[^\w\s]", "", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    words = text.split()
-
-    filters_list = await filters_col.find().to_list(None)
-
-    # 4+ words → first 4 exact
-    if len(words) >= 4:
-        key = " ".join(words[:4])
-        for f in filters_list:
-            fw = f["name"].split()
-            if len(fw) >= 4 and " ".join(fw[:4]) == key:
-                return await send_reply(msg, f)
-
-    # 3 words → first 2
-    if len(words) >= 2:
-        key = " ".join(words[:2])
-        for f in filters_list:
-            fw = f["name"].split()
-            if len(fw) == 3 and " ".join(fw[:2]) == key:
-                return await send_reply(msg, f)
-
-    # 2 words → first word
-    key = words[0]
-    for f in filters_list:
-        fw = f["name"].split()
-        if len(fw) == 2 and fw[0] == key:
-            return await send_reply(msg, f)
-
-    # 1 word
-    for f in filters_list:
-        if f["name"] == key:
-            return await send_reply(msg, f)
-
-# ---------- RUN ----------
 print("🤖 Filter Bot Started")
 app.run()
