@@ -131,5 +131,9 @@ async def group_handler(client, message):
     asyncio.create_task(auto_delete(reply))
     asyncio.create_task(auto_delete(message))
 
+@app.on_message(filters.group & filters.text)
+async def test(client, message):
+    await message.reply("BOT IS READING THIS GROUP ✅")
+
 print("🤖 Filter Bot Running")
 app.run()
