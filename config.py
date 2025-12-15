@@ -7,9 +7,6 @@ BOT_TOKEN = "8140111290:AAHkbPYHFIEiOIrQlGaNRDFyuUv-qvu2Mi8"
 
 
 # Bot owner (sirf ye user commands use kar sakta hai)
-/import
-/del
-/list
 OWNER_ID = 1327021082
 
 
