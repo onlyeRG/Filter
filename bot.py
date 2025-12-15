@@ -1,141 +1,151 @@
 import asyncio
+import json
 import re
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from pyrogram.enums import ChatType
 from motor.motor_asyncio import AsyncIOMotorClient
-from config import CONFIG
+from config import *
 
-# ─── MongoDB ────────────────────────────────────────────────
-mongo = AsyncIOMotorClient(CONFIG.MONGO_URL)
-db = mongo[CONFIG.DB_NAME]
-filters_col = db.filters
+# -------------------- DB --------------------
+mongo = AsyncIOMotorClient(MONGO_URL)
+db = mongo[DB_NAME]
+col = db.filters
 
-# ─── Bot ────────────────────────────────────────────────────
+# -------------------- BOT --------------------
 app = Client(
-    "filter_bot",
-    api_id=CONFIG.API_ID,
-    api_hash=CONFIG.API_HASH,
-    bot_token=CONFIG.BOT_TOKEN
+    "filter-bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
 )
 
-# ─── Utils ──────────────────────────────────────────────────
+# -------------------- HELPERS --------------------
 
-IGNORE_WORDS = {"hindi", "dub", "sub", "movie", "series"}
-
-def normalize(text: str) -> list[str]:
+def normalize(text: str) -> str:
+    """lowercase + remove symbols"""
     text = text.lower()
     text = re.sub(r"[^a-z0-9\s]", " ", text)
-    words = [w for w in text.split() if w not in IGNORE_WORDS]
-    return words
+    return re.sub(r"\s+", " ", text).strip()
 
-def match_filter(message_words, filter_words):
-    """
-    Matching rules:
-    - If filter has <=2 words → partial allowed
-    - If filter has >=4 words → full match required
-    """
-    if len(filter_words) >= 4:
-        return message_words == filter_words
+def build_keyboard(text: str):
+    match = re.search(r"\[(.*?)\]\(buttonurl://(.*?)\)", text)
+    if not match:
+        return text, None
 
-    if len(filter_words) <= 2:
-        return all(w in message_words for w in filter_words)
+    btn_text = match.group(1)
+    btn_url = match.group(2)
+    clean = re.sub(r"\[(.*?)\]\(buttonurl://(.*?)\)", "", text).strip()
 
-    return False
+    kb = InlineKeyboardMarkup(
+        [[InlineKeyboardButton(btn_text, url=btn_url)]]
+    )
+    return clean, kb
 
-# ─── Commands ───────────────────────────────────────────────
+# -------------------- COMMANDS --------------------
 
-@app.on_message(filters.command("start") & filters.private)
-async def start(_, m):
-    await m.reply("🤖 Filter Bot Active")
+@app.on_message(filters.private & filters.command("start"))
+async def start(_, m: Message):
+    await m.reply_text("✅ Filter Bot is running")
 
-@app.on_message(filters.command("import") & filters.private & filters.user(CONFIG.OWNER_ID))
-async def import_filters(_, m):
-    import json
-    with open(CONFIG.IMPORT_FILE_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
+@app.on_message(filters.private & filters.command("import") & filters.user(OWNER_ID))
+async def import_filters(_, m: Message):
+    try:
+        with open("filters.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-    await filters_col.delete_many({})
-    for item in data:
-        await filters_col.insert_one({
-            "name": item["name"],
-            "text": item["text"],
-            "words": normalize(item["name"])
-        })
+        await col.delete_many({})
+        docs = []
 
-    await m.reply(f"✅ Imported {len(data)} filters")
+        for i in data:
+            name = normalize(i["name"])
+            words = name.split()
 
-@app.on_message(filters.command("list") & filters.group)
-async def list_filters(_, m):
-    docs = await filters_col.find().to_list(None)
-    names = [d["name"] for d in docs]
-    text = "\n".join(names)[:4000]
-    await m.reply(text or "No filters")
+            docs.append({
+                "name": name,
+                "words": words,
+                "word_count": len(words),
+                "text": i["text"]
+            })
 
-@app.on_message(filters.command("del") & filters.group & filters.user(CONFIG.OWNER_ID))
-async def delete_filter(_, m):
+        if docs:
+            await col.insert_many(docs)
+            await m.reply_text(f"✅ Imported {len(docs)} filters")
+        else:
+            await m.reply_text("❌ No valid filters")
+
+    except Exception as e:
+        await m.reply_text(str(e))
+
+@app.on_message(filters.group & filters.command("list"))
+async def list_filters(_, m: Message):
+    items = await col.find().to_list(None)
+    if not items:
+        return await m.reply_text("No filters")
+
+    text = "\n".join(f"- {i['name']}" for i in items)
+    await m.reply_text(text[:4000])
+
+@app.on_message(filters.group & filters.command("del") & filters.user(OWNER_ID))
+async def del_filter(_, m: Message):
     if len(m.command) < 2:
-        return await m.reply("Usage: /del name")
+        return await m.reply_text("/del <name>")
 
-    name = " ".join(m.command[1:]).lower()
-    r = await filters_col.delete_one({"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}})
+    name = normalize(" ".join(m.command[1:]))
+    r = await col.delete_one({"name": name})
 
-    await m.reply("✅ Deleted" if r.deleted_count else "❌ Not found")
+    if r.deleted_count:
+        await m.reply_text("✅ Deleted")
+    else:
+        await m.reply_text("❌ Not found")
 
-# ─── MAIN FILTER LOGIC ──────────────────────────────────────
+# -------------------- FILTER LOGIC --------------------
 
-@app.on_message(
-    filters.group
-    & filters.text
-    & ~filters.command
-)
+@app.on_message(filters.group & filters.text & ~filters.regex(r"^/"))
 async def apply_filter(_, m: Message):
-    if m.chat.id not in CONFIG.ALLOWED_GROUPS:
-        return
-    if m.edit_date:
-        return
+    text = normalize(m.text)
+    words = text.split()
 
-    msg_words = normalize(m.text)
-    if not msg_words:
-        return
-
+    filters_db = await col.find().to_list(None)
     matches = []
 
-    async for f in filters_col.find():
-        if match_filter(msg_words, f["words"]):
-            matches.append(f)
+    for f in filters_db:
+        # Rule:
+        # 1 word filter → trigger if word present
+        # 2 words → first word enough
+        # 3+ words → full phrase required
+        if f["word_count"] == 1:
+            if f["words"][0] in words:
+                matches.append(f)
 
-    # ❌ If none OR more than one match → do nothing
+        elif f["word_count"] == 2:
+            if f["words"][0] in words:
+                matches.append(f)
+
+        else:
+            if f["name"] in text:
+                matches.append(f)
+
+    # If multiple matches → do nothing
     if len(matches) != 1:
         return
 
-    f = matches[0]
+    target = matches[0]
+    clean, kb = build_keyboard(target["text"])
 
-    # Button parsing
-    btn = None
-    txt = f["text"]
-
-    match = re.search(r"\[(.*?)\]\(buttonurl:\/\/(.*?)\)", txt)
-    if match:
-        btn = InlineKeyboardMarkup(
-            [[InlineKeyboardButton(match.group(1), url=match.group(2))]]
-        )
-        txt = re.sub(r"\[.*?\]\(buttonurl:\/\/.*?\)", "", txt).strip()
-
-    reply = await m.reply(
-        txt,
-        reply_markup=btn,
+    reply = await m.reply_text(
+        clean,
+        reply_markup=kb,
         disable_web_page_preview=True
     )
 
-    await asyncio.sleep(CONFIG.AUTO_DELETE_TIME)
-
+    # Auto delete
+    await asyncio.sleep(AUTO_DELETE_TIME)
     try:
         await reply.delete()
         await m.delete()
     except:
         pass
 
-# ─── RUN ────────────────────────────────────────────────────
+# -------------------- RUN --------------------
 print("🤖 Filter Bot Started")
 app.run()
